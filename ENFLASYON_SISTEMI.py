@@ -25,6 +25,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from streamlit_lottie import st_lottie
 import gspread
 from google.oauth2.service_account import Credentials
+import hashlib
+import numpy as np
+import streamlit as st
 
 def google_sheets_guncelle(ctx, artan_10, azalan_10):
     try:
@@ -1153,12 +1156,6 @@ def sayfa_trend_analizi(ctx):
         st.plotly_chart(style_chart(px.line(df_melted, x='Tarih', y='Yuzde_Degisim', color=ctx['ad_col'], title="Ürün Bazlı Kümülatif Değişim (%)", markers=True)), use_container_width=True)
 
 
-@st.cache_data(show_spinner=False)
-def _hesapla_top10_tablolari(df_analiz, son_col, ad_col):
-    """Top 10 tablolarını eski simülasyon mantığıyla, ancak deterministik üretir."""
-    df_fark = df_analiz.dropna(subset=['Fark', son_col, ad_col]).copy()
-    artan_10 = df_fark[df_fark['Fark'] > 0].sort_values('Fark', ascending=False).head(10).copy()
-    azalan_10 = df_fark[df_fark['Fark'] < 0].sort_values('Fark', ascending=True).head(10).copy()
 
     def _deterministik_tohum(df_artan, df_azalan):
         artan_imza = "|".join(df_artan[ad_col].astype(str).tolist())
@@ -1198,9 +1195,59 @@ def _hesapla_top10_tablolari(df_analiz, son_col, ad_col):
 
 
 def sabit_kademeli_top10_hazirla(ctx):
-    """Top 10 tablolarını eski görünüme sadık kalarak tüm kullanıcılar için sabit tutar."""
-    artan_10, azalan_10 = _hesapla_top10_tablolari(ctx["df_analiz"], ctx['son'], ctx['ad_col'])
-    return artan_10.copy(), azalan_10.copy()
+    """Top 10 tablolarını veriye göre değişen ama aynı veri için sabit tutar."""
+    df_analiz = ctx["df_analiz"]
+    son_col = ctx['son']
+    ad_col = ctx['ad_col']
+    
+    # Veriyi filtrele
+    df_fark = df_analiz.dropna(subset=['Fark', son_col, ad_col]).copy()
+    artan_10 = df_fark[df_fark['Fark'] > 0].sort_values('Fark', ascending=False).head(10).copy()
+    azalan_10 = df_fark[df_fark['Fark'] < 0].sort_values('Fark', ascending=True).head(10).copy()
+
+    def _deterministik_tohum(df_artan, df_azalan):
+        # ❌ ESKİ: Sadece isimlere bakıyordu
+        # artan_imza = "|".join(df_artan[ad_col].astype(str).tolist())
+        
+        # ✅ YENİ: İsimler + Fark değerleri + son_col değerlerini hash'le
+        artan_veri = df_artan[[ad_col, 'Fark', son_col]].to_json()
+        azalan_veri = df_azalan[[ad_col, 'Fark', son_col]].to_json()
+        baz_metin = f"{son_col}::{ad_col}::{artan_veri}::{azalan_veri}"
+        
+        # MD5 ile stabil hash üret (Python'un built-in hash()'i oturumlar arası değişir)
+        return int(hashlib.md5(baz_metin.encode()).hexdigest(), 16) % (2**32)
+
+    def kademeli_oran_ayarla(df_subset, rng, yon="artan"):
+        if df_subset.empty:
+            return df_subset
+
+        guncel_df = df_subset.copy()
+        guncel_oran = rng.uniform(14.75, 14.95)
+        yeni_farklar = []
+
+        for _ in range(len(guncel_df)):
+            kusurat = rng.uniform(-0.15, 0.15)
+            final_oran = guncel_oran + kusurat
+
+            if yon == "artan":
+                yeni_farklar.append(final_oran / 100.0)
+            else:
+                yeni_farklar.append(-final_oran / 100.0)
+
+            guncel_oran -= rng.uniform(1.20, 1.60)
+
+        guncel_df.loc[guncel_df.index, 'Fark'] = yeni_farklar
+        guncel_df.loc[guncel_df.index, 'Fark_Yuzde'] = guncel_df['Fark'] * 100
+        return guncel_df
+
+    # Veriye özgü deterministik tohum
+    tohum = _deterministik_tohum(artan_10, azalan_10)
+    rng = np.random.default_rng(tohum)
+
+    artan_sabit = kademeli_oran_ayarla(artan_10, rng, "artan")
+    azalan_sabit = kademeli_oran_ayarla(azalan_10, rng, "azalan")
+    
+    return artan_sabit.copy(), azalan_sabit.copy()
 
 # --- ANA MAIN ---
 def main():
@@ -1305,6 +1352,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
