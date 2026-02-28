@@ -183,9 +183,13 @@ def _internal_calculate_metrics():
     gunler = sorted([c for c in pivot.columns if c != 'Kod'])
     son = gunler[-1]
 
-    # BAZ TARİH
-    baz_tarih = "2025-12-30" if "2025-12-30" in gunler else (
-        [d for d in gunler if d.startswith("2025")][-1] if [d for d in gunler if d.startswith("2025")] else gunler[0])
+    # BAZ TARİH - Her zaman önceki ayın son günü baz alınır
+    dt_son = datetime.strptime(son, '%Y-%m-%d')
+
+    # Önceki ayın son verili gününü bul
+    onceki_ay = f"{dt_son.year}-{dt_son.month-1:02d}"
+    onceki_ay_gunleri = [d for d in gunler if d.startswith(onceki_ay)]
+    baz_tarih = max(onceki_ay_gunleri) if onceki_ay_gunleri else gunler[0]
 
     def calculate_geo_mean_series(df, cols):
         data = df[cols].values.astype(float)
