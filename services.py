@@ -230,9 +230,9 @@ def _internal_calculate_metrics():
     # Örn: 4.03 -> 4.00, 4.99 -> 4.00
     month_end_forecast = math.floor(enf_genel)
 
-    prev_day = gunler[-2] if len(gunler) > 1 else son
+    # Günlük değişim: Son gün / Önceki gün (baz_tarih = önceki ayın son günü)
     with np.errstate(divide='ignore', invalid='ignore'):
-        df_analiz['Gunluk_Degisim'] = (df_analiz[son] / df_analiz[prev_day]) - 1
+        df_analiz['Gunluk_Degisim'] = (df_analiz[son] / df_analiz[baz_tarih]) - 1
     df_analiz['Gunluk_Degisim'] = df_analiz['Gunluk_Degisim'].replace([np.inf, -np.inf], np.nan).fillna(0)
 
     rap_text = generate_detailed_static_report(df_analiz, son, enf_genel, enf_gida, 0, month_end_forecast, ad_col,
