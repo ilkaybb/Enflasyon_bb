@@ -713,13 +713,11 @@ def hesapla_metrikler(df_analiz_base, secilen_tarih, gunler, tum_gunler_sirali, 
     
     df_analiz['Fark_Yuzde'] = df_analiz['Fark'] * 100
     
+    # Günlük değişim: Son gün / Önceki gün (baz_col = önceki ayın son günü)
+    df_analiz['Gunluk_Degisim'] = (df_analiz[son] / df_analiz[baz_col].replace(0, np.nan)) - 1
+    df_analiz['Gunluk_Degisim'] = df_analiz['Gunluk_Degisim'].replace([np.inf, -np.inf], np.nan).fillna(0)
     gun_farki = 0
-    if len(gunler) >= 2:
-        onceki_gun = gunler[-2]
-        df_analiz['Gunluk_Degisim'] = (df_analiz[son] / df_analiz[onceki_gun].replace(0, np.nan)) - 1
-    else:
-        df_analiz['Gunluk_Degisim'] = 0
-        onceki_gun = son
+    onceki_gun = baz_col
 
     resmi_aylik_degisim = 4.84
     tahmin = enf_genel
