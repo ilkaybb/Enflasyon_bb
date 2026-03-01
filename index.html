@@ -226,14 +226,18 @@
                         const picker = document.getElementById("time-machine-date");
                         if(picker) {
                             picker.innerHTML = "";
-                            const displayDates = allDates.filter(d => d >= "2026-01-01").reverse();
+                            const displayDates = [...allDates].reverse();
                             displayDates.forEach(date => {
                                 const option = document.createElement("option");
                                 option.value = date;
                                 option.text = date;
                                 picker.appendChild(option);
                             });
-                            if(displayDates.length > 0) picker.value = displayDates[0];
+                            if(displayDates.length > 0) {
+                                picker.value = displayDates[0];
+                            } else {
+                                picker.innerHTML = '<option value="">Veri yok</option>';
+                            }
                         }
                     }
 

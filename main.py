@@ -1,16 +1,21 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from services import calculate_dashboard_metrics, create_full_pdf
 import uvicorn
 
+BASE_DIR = Path(__file__).resolve().parent
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=BASE_DIR), name="static")
 
 @app.get("/")
 def read_root():
-    return Response(content=open("templates/index.html", "r", encoding="utf-8").read(), media_type="text/html")
+    index_path = BASE_DIR / "index.html"
+    return Response(content=index_path.read_text(encoding="utf-8"), media_type="text/html")
 
 @app.get("/api/dashboard")
 async def get_dashboard_data(refresh: bool = False):
