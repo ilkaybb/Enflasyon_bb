@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import re
 from datetime import datetime
 from github import Github
+from github.GithubException import GithubException
 from io import BytesIO
 import zipfile
 import base64
@@ -42,6 +43,7 @@ def github_excel_guncelle(df_yeni, dosya_adi):
     repo = get_github_repo()
     if not repo: return "Repo Yok"
     try:
+        c = None        
         try:
             c = repo.get_contents(dosya_adi, ref=BRANCH_NAME)
             old = pd.read_excel(BytesIO(c.decoded_content), dtype=str)
@@ -49,8 +51,11 @@ def github_excel_guncelle(df_yeni, dosya_adi):
             # Aynı tarih ve kod varsa eskisini çıkar
             old = old[~((old['Tarih'].astype(str) == yeni_tarih) & (old['Kod'].isin(df_yeni['Kod'])))]
             final = pd.concat([old, df_yeni], ignore_index=True)
-        except:
-            c = None; final = df_yeni
+        except GithubException as e:
+            if e.status == 404:
+                final = df_yeni
+            else:
+                raise
         
         out = BytesIO()
         with pd.ExcelWriter(out, engine='openpyxl') as w:
