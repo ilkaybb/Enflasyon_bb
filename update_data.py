@@ -24,6 +24,15 @@ def get_github_repo():
         return None
     g = Github(token)
     return g.get_repo(repo_name)
+    
+def github_file_to_bytes(content_file, repo=None):
+    try:
+        return content_file.decoded_content
+    except Exception:
+        if repo and getattr(content_file, "sha", None):
+            blob = repo.get_git_blob(content_file.sha)
+            return base64.b64decode(blob.content)
+        raise
 
 def github_excel_oku(dosya_adi, sayfa_adi=None):
     repo = get_github_repo()
@@ -31,9 +40,9 @@ def github_excel_oku(dosya_adi, sayfa_adi=None):
     try:
         c = repo.get_contents(dosya_adi, ref=BRANCH_NAME)
         if sayfa_adi:
-            df = pd.read_excel(BytesIO(c.decoded_content), sheet_name=sayfa_adi, dtype=str)
+            df = pd.read_excel(BytesIO(github_file_to_bytes(c, repo)), sheet_name=sayfa_adi, dtype=str)
         else:
-            df = pd.read_excel(BytesIO(c.decoded_content), dtype=str)
+            df = pd.read_excel(BytesIO(github_file_to_bytes(c, repo)), dtype=str)
         return df
     except Exception as e:
         print(f"Excel Okuma Hatası ({dosya_adi}): {e}")
@@ -46,7 +55,7 @@ def github_excel_guncelle(df_yeni, dosya_adi):
         c = None        
         try:
             c = repo.get_contents(dosya_adi, ref=BRANCH_NAME)
-            old = pd.read_excel(BytesIO(c.decoded_content), dtype=str)
+            old = pd.read_excel(BytesIO(github_file_to_bytes(c, repo)), dtype=str)
             yeni_tarih = str(df_yeni['Tarih'].iloc[0])
             # Aynı tarih ve kod varsa eskisini çıkar
             old = old[~((old['Tarih'].astype(str) == yeni_tarih) & (old['Kod'].isin(df_yeni['Kod'])))]
