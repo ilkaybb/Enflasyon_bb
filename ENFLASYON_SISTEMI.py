@@ -664,18 +664,22 @@ def hesapla_metrikler(df_analiz_base, secilen_tarih, gunler, tum_gunler_sirali, 
         gecerli_veri = gecerli_veri.dropna(subset=['Aylik_Ortalama', baz_col])
 
         p_rel = gecerli_veri['Aylik_Ortalama'] / gecerli_veri[baz_col].replace(0, np.nan)
-        p_rel = p_rel.replace([np.inf, -np.inf], np.nan).fillna(1)
+        p_rel = p_rel.replace([np.inf, -np.inf], np.nan)
         gecerli_veri['Simule_Fiyat'] = gecerli_veri['Aylik_Ortalama']
 
-        w = gecerli_veri[aktif_agirlik_col]
-        if w.sum() > 0:
-            enf_genel = (w * p_rel).sum() / w.sum() * 100 - 100
+        p_rel_valid = p_rel.notna()
+        if p_rel_valid.any():
+            w = gecerli_veri.loc[p_rel_valid, aktif_agirlik_col]
+            if w.sum() > 0:
+                enf_genel = (w * p_rel.loc[p_rel_valid]).sum() / w.sum() * 100 - 100
 
         gida_df = gecerli_veri[gecerli_veri['Kod'].astype(str).str.startswith("01")]
-        if not gida_df.empty and gida_df[aktif_agirlik_col].sum() > 0:
+        if not gida_df.empty:
             gida_rel = gida_df['Simule_Fiyat'] / gida_df[baz_col].replace(0, np.nan)
-            gida_rel = gida_rel.replace([np.inf, -np.inf], np.nan).fillna(1)
-            enf_gida = ((gida_df[aktif_agirlik_col] * gida_rel).sum() / gida_df[aktif_agirlik_col].sum() * 100) - 100
+            gida_rel = gida_rel.replace([np.inf, -np.inf], np.nan)
+            gida_valid = gida_rel.notna()
+            if gida_valid.any() and gida_df.loc[gida_valid, aktif_agirlik_col].sum() > 0:
+                enf_gida = ((gida_df.loc[gida_valid, aktif_agirlik_col] * gida_rel.loc[gida_valid]).sum() / gida_df.loc[gida_valid, aktif_agirlik_col].sum() * 100) - 100
 
         if enf_genel > 0:
             yillik_enf = ((1 + enf_genel/100) * (1 + BEKLENEN_AYLIK_ORT/100)**11 - 1) * 100
@@ -688,11 +692,12 @@ def hesapla_metrikler(df_analiz_base, secilen_tarih, gunler, tum_gunler_sirali, 
     
     df_analiz['Fark_Yuzde'] = df_analiz['Fark'] * 100
     
-    # Günlük değişim: Son gün / Bir önceki gün (ayın ilk günü için önceki ayın son günü)
-    df_analiz['Gunluk_Degisim'] = (df_analiz[son] / df_analiz[baz_col].replace(0, np.nan)) - 1
+    # Günlük değişim: son gün / bir önceki verili gün
+    son_idx = gunler.index(son)
+    onceki_gun = gunler[son_idx - 1] if son_idx > 0 else baz_col
+    df_analiz['Gunluk_Degisim'] = (df_analiz[son] / df_analiz[onceki_gun].replace(0, np.nan)) - 1
     df_analiz['Gunluk_Degisim'] = df_analiz['Gunluk_Degisim'].replace([np.inf, -np.inf], np.nan).fillna(0)
-    gun_farki = 0
-    onceki_gun = baz_col
+    gun_farki = son_idx
 
     resmi_aylik_degisim = 4.84
     tahmin = enf_genel
@@ -915,10 +920,10 @@ def sayfa_piyasa_ozeti(ctx):
        ozet_html = f"""
        <div class="kpi-card" style="height:100%; display:flex; flex-direction:column; justify-content:center;">
            <div style="font-size:13px; color:#94a3b8; font-weight:800; letter-spacing:1px;">YÜKSELENLER</div>
-           <div style="font-size:32px; color:#ef4444; font-weight:800; text-shadow: 0 0 15px rgba(239,68,68,0.3);">{len(df[df['Fark'] > 0])} Ürün</div>
+           <div style="font-size:32px; color:#ef4444; font-weight:800; text-shadow: 0 0 15px rgba(239,68,68,0.3);">{len(df[df['Gunluk_Degisim'] > 0])} Ürün</div>
            <div style="margin: 25px 0; border-top:1px solid rgba(255,255,255,0.1)"></div>
            <div style="font-size:13px; color:#94a3b8; font-weight:800; letter-spacing:1px;">DÜŞENLER</div>
-           <div style="font-size:32px; color:#22c55e; font-weight:800; text-shadow: 0 0 15px rgba(34,197,94,0.3);">{len(df[df['Fark'] < 0])} Ürün</div>
+           <div style="font-size:32px; color:#22c55e; font-weight:800; text-shadow: 0 0 15px rgba(34,197,94,0.3);">{len(df[df['Gunluk_Degisim'] < 0])} Ürün</div>
        </div>
        """
        st.markdown(ozet_html, unsafe_allow_html=True)
