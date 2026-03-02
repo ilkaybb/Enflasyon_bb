@@ -619,7 +619,7 @@ def verileri_getir_cache():
         df_f = df_f[df_f['Fiyat'] > 0]
         
         pivot = df_f.pivot_table(index='Kod', columns='Tarih_Str', values='Fiyat', aggfunc='mean')
-        pivot = pivot.ffill(axis=1).bfill(axis=1).reset_index()
+        pivot = pivot.ffill(axis=1).reset_index()
         if pivot.empty: return None, None, None, None
 
         if 'Grup' not in df_s.columns:
@@ -1154,8 +1154,8 @@ def sabit_kademeli_top10_hazirla(ctx):
     df_fark['Fark'] = (df_fark['Son_Fiyat'] / df_fark['Ilk_Fiyat']) - 1
     df_fark['Fark_Yuzde'] = df_fark['Fark'] * 100
 
-    artan_10 = df_fark.sort_values('Fark', ascending=False).head(10).copy()
-    azalan_10 = df_fark.sort_values('Fark', ascending=True).head(10).copy()
+    artan_10 = df_fark[df_fark['Fark'] > 0].sort_values('Fark', ascending=False).head(10).copy()
+    azalan_10 = df_fark[df_fark['Fark'] < 0].sort_values('Fark', ascending=True).head(10).copy()
 
     return artan_10, azalan_10
 
