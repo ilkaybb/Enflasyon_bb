@@ -920,10 +920,10 @@ def sayfa_piyasa_ozeti(ctx):
        ozet_html = f"""
        <div class="kpi-card" style="height:100%; display:flex; flex-direction:column; justify-content:center;">
            <div style="font-size:13px; color:#94a3b8; font-weight:800; letter-spacing:1px;">YÜKSELENLER</div>
-           <div style="font-size:32px; color:#ef4444; font-weight:800; text-shadow: 0 0 15px rgba(239,68,68,0.3);">{len(df[df['Gunluk_Degisim'] > 0])} Ürün</div>
+           <div style="font-size:32px; color:#ef4444; font-weight:800; text-shadow: 0 0 15px rgba(239,68,68,0.3);">{len(df[df['Fark'] > 0])} Ürün</div>
            <div style="margin: 25px 0; border-top:1px solid rgba(255,255,255,0.1)"></div>
            <div style="font-size:13px; color:#94a3b8; font-weight:800; letter-spacing:1px;">DÜŞENLER</div>
-           <div style="font-size:32px; color:#22c55e; font-weight:800; text-shadow: 0 0 15px rgba(34,197,94,0.3);">{len(df[df['Gunluk_Degisim'] < 0])} Ürün</div>
+           <div style="font-size:32px; color:#22c55e; font-weight:800; text-shadow: 0 0 15px rgba(34,197,94,0.3);">{len(df[df['Fark'] < 0])} Ürün</div>
        </div>
        """
        st.markdown(ozet_html, unsafe_allow_html=True)
