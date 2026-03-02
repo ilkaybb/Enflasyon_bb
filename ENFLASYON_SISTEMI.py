@@ -388,6 +388,44 @@ def temizle_fiyat(t):
     except:
         return None
         
+def parse_fiyat_degeri(v):
+    if pd.isna(v):
+        return np.nan
+    s = str(v).strip().replace('TL', '').replace('₺', '').replace(' ', '').replace(" ", "")
+    s = re.sub(r'[^\d,\.-]', '', s)
+    if not s:
+        return np.nan
+
+    if ',' in s and '.' in s:
+        if s.rfind('.') > s.rfind(','):
+            # 1,653.00 -> 1653.00
+            s = s.replace(',', '')
+        else:
+            # 1.653,00 -> 1653.00
+            s = s.replace('.', '').replace(',', '.')
+    elif ',' in s:
+        parts = s.split(',')
+        if len(parts) == 2:
+            after_len = len(parts[1])
+            before = parts[0].replace('-', '')
+            if after_len <= 2:
+                s = s.replace(',', '.')
+            elif after_len == 3 and before == '0':
+                s = s.replace(',', '.')
+            else:
+                s = s.replace(',', '')
+        else:
+            s = s.replace(',', '')
+    elif '.' in s:
+        parts = s.split('.')
+        if len(parts) > 2:
+            s = ''.join(parts[:-1]) + '.' + parts[-1]
+
+    try:
+        return float(s)
+    except Exception:
+        return np.nan
+
 def kod_standartlastir(k): 
     return str(k).replace('.0', '').strip().zfill(7)
 
@@ -614,8 +652,7 @@ def verileri_getir_cache():
         df_s['Kod'] = df_s[kod_col].astype(str).apply(kod_standartlastir)
         df_s = df_s.drop_duplicates(subset=['Kod'], keep='first')
         
-        df_f['Fiyat'] = df_f['Fiyat'].astype(str).str.replace(',', '.').str.strip()
-        df_f['Fiyat'] = pd.to_numeric(df_f['Fiyat'], errors='coerce')
+        df_f['Fiyat'] = df_f['Fiyat'].apply(parse_fiyat_degeri)
         df_f = df_f[df_f['Fiyat'] > 0]
         
         pivot = df_f.pivot_table(index='Kod', columns='Tarih_Str', values='Fiyat', aggfunc='mean')
