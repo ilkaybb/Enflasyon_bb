@@ -645,21 +645,32 @@ def hesapla_metrikler(df_analiz_base, secilen_tarih, gunler, tum_gunler_sirali, 
     df_analiz[aktif_agirlik_col] = pd.to_numeric(df_analiz.get(aktif_agirlik_col, 0), errors='coerce').fillna(0)
     gecerli_veri = df_analiz[df_analiz[aktif_agirlik_col] > 0].copy()
     
-    gecerli_veri = gecerli_veri.dropna(subset=[son, baz_col])
+    dt_son = datetime.strptime(son, '%Y-%m-%d')
+    bu_ay_prefix = dt_son.strftime('%Y-%m')
+    bu_ay_cols = [c for c in gunler if c.startswith(bu_ay_prefix) and c <= son]
+    if not bu_ay_cols:
+        bu_ay_cols = [son]
+
+    gecerli_veri = gecerli_veri.dropna(subset=[baz_col])
 
     enf_genel = 0.0
     enf_gida = 0.0
     yillik_enf = 0.0
     
     if not gecerli_veri.empty:
-        w = gecerli_veri[aktif_agirlik_col]
-        p_rel = gecerli_veri[son] / gecerli_veri[baz_col].replace(0, np.nan)
-        p_rel = p_rel.replace([np.inf, -np.inf], np.nan).fillna(1)
-        gecerli_veri['Simule_Fiyat'] = gecerli_veri[son]
+        aylik_data = gecerli_veri[bu_ay_cols].apply(pd.to_numeric, errors='coerce')
+        aylik_data = aylik_data.where(aylik_data > 0, np.nan)
+        gecerli_veri['Aylik_Ortalama'] = np.exp(np.log(aylik_data).mean(axis=1))
+        gecerli_veri = gecerli_veri.dropna(subset=['Aylik_Ortalama', baz_col])
 
-        if w.sum() > 0: 
+        p_rel = gecerli_veri['Aylik_Ortalama'] / gecerli_veri[baz_col].replace(0, np.nan)
+        p_rel = p_rel.replace([np.inf, -np.inf], np.nan).fillna(1)
+        gecerli_veri['Simule_Fiyat'] = gecerli_veri['Aylik_Ortalama']
+
+        w = gecerli_veri[aktif_agirlik_col]
+        if w.sum() > 0:
             enf_genel = (w * p_rel).sum() / w.sum() * 100 - 100
-        
+
         gida_df = gecerli_veri[gecerli_veri['Kod'].astype(str).str.startswith("01")]
         if not gida_df.empty and gida_df[aktif_agirlik_col].sum() > 0:
             gida_rel = gida_df['Simule_Fiyat'] / gida_df[baz_col].replace(0, np.nan)
@@ -859,16 +870,22 @@ def sayfa_piyasa_ozeti(ctx):
        bu_ayin_gunleri = [g for g in gunler if g.startswith(hedef_ay_prefix) and g <= son_gun]
 
        for gun in bu_ayin_gunleri:
-           cols_to_use = [gun, baz_col, agirlik_col]
+           gecerli_kolonlar = [g for g in bu_ayin_gunleri if g <= gun]
+           cols_to_use = list(set(gecerli_kolonlar + [baz_col, agirlik_col]))
            temp_df = df_ana[cols_to_use].copy()
 
-           temp_df[gun] = pd.to_numeric(temp_df[gun], errors='coerce')
+           for c in gecerli_kolonlar:
+               temp_df[c] = pd.to_numeric(temp_df[c], errors='coerce')
+
+           data_values = temp_df[gecerli_kolonlar].where(temp_df[gecerli_kolonlar] > 0, np.nan)
+           temp_df['Kümülatif_Ort'] = np.exp(np.log(data_values).mean(axis=1))
            temp_df[baz_col] = pd.to_numeric(temp_df[baz_col], errors='coerce')
-           temp_df = temp_df[(temp_df[gun] > 0) & (temp_df[baz_col] > 0)]
+           temp_df = temp_df.dropna(subset=['Kümülatif_Ort', baz_col])
+           temp_df = temp_df[temp_df[baz_col] > 0]
 
            if not temp_df.empty:
                w = temp_df[agirlik_col]
-               p_rel = temp_df[gun] / temp_df[baz_col]
+               p_rel = temp_df['Kümülatif_Ort'] / temp_df[baz_col]
                toplam_w = w.sum()
 
                if toplam_w > 0:
@@ -879,8 +896,6 @@ def sayfa_piyasa_ozeti(ctx):
        
        if not df_trend.empty: 
            df_trend = df_trend.sort_values('Tarih').reset_index(drop=True)
-           # Grafik son noktası KPI ile birebir aynı hesap değerini göstermeli
-           df_trend.loc[df_trend.index[-1], 'Deger'] = ctx["enf_genel"]
 
            son_deger = df_trend.iloc[-1]['Deger']
            y_max = max(5, df_trend['Deger'].max() + 0.5)
