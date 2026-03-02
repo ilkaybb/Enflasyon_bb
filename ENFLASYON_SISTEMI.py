@@ -26,7 +26,6 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from streamlit_lottie import st_lottie
 import gspread
 from google.oauth2.service_account import Credentials
-import hashlib
 import numpy as np
 import streamlit as st
 
@@ -646,17 +645,7 @@ def hesapla_metrikler(df_analiz_base, secilen_tarih, gunler, tum_gunler_sirali, 
     df_analiz[aktif_agirlik_col] = pd.to_numeric(df_analiz.get(aktif_agirlik_col, 0), errors='coerce').fillna(0)
     gecerli_veri = df_analiz[df_analiz[aktif_agirlik_col] > 0].copy()
     
-    def geo_mean(row):
-        vals = [x for x in row if isinstance(x, (int, float)) and x > 0]
-        return np.exp(np.mean(np.log(vals))) if vals else np.nan
-
-    dt_son = datetime.strptime(son, '%Y-%m-%d')
-    bu_ay_str = f"{dt_son.year}-{dt_son.month:02d}"
-    bu_ay_cols = [c for c in gunler if c.startswith(bu_ay_str)]
-    if not bu_ay_cols: bu_ay_cols = [son]
-    
-    gecerli_veri['Aylik_Ortalama'] = gecerli_veri[bu_ay_cols].apply(geo_mean, axis=1)
-    gecerli_veri = gecerli_veri.dropna(subset=['Aylik_Ortalama', baz_col])
+    gecerli_veri = gecerli_veri.dropna(subset=[son, baz_col])
 
     enf_genel = 0.0
     enf_gida = 0.0
@@ -664,60 +653,21 @@ def hesapla_metrikler(df_analiz_base, secilen_tarih, gunler, tum_gunler_sirali, 
     
     if not gecerli_veri.empty:
         w = gecerli_veri[aktif_agirlik_col]
-        
-        base_rel = gecerli_veri['Aylik_Ortalama'] / gecerli_veri[baz_col]
-        
-        tarih_kilit_kodu = int(son.replace('-', ''))
-        rng = np.random.default_rng(tarih_kilit_kodu)
-        
-        KAT_HEDEFLERI = {
-            "01": (1.063, 1.064),   
-            "02": (1.075, 1.104),   
-            "03": (1.060, 1.061),   
-            "04": (1.040, 1.044),   
-            "05": (1.000, 1.004),   
-            "06": (1.005, 1.009),   
-            "07": (1.035, 1.045),   
-            "08": (1.035, 1.045),   
-            "09": (0.950, 0.985),   
-            "10": (1.025, 1.055),   
-            "11": (1.035, 1.035),   
-            "12": (1.035, 1.035),   
-            "13": (1.030, 1.035)    
-        }
-
-        p_rel_list = []
-        for idx, row in gecerli_veri.iterrows():
-            kod_prefix = str(row['Kod']).zfill(7)[:2]
-            alt_lim, ust_lim = KAT_HEDEFLERI.get(kod_prefix, (1.01, 1.04))
-            
-            gercek_degisim = base_rel[idx]
-            
-            if kod_prefix in ['03', '06'] or gercek_degisim > 1.15 or gercek_degisim < 0.90:
-                yeni_rel = rng.uniform(alt_lim, ust_lim)
-            else:
-                noise = rng.uniform(-0.02, 0.02)
-                yeni_rel = gercek_degisim + noise
-                yeni_rel = max(min(yeni_rel, ust_lim + 0.015), alt_lim - 0.015)
-                
-            p_rel_list.append(yeni_rel)
-            
-        p_rel = pd.Series(p_rel_list, index=base_rel.index)
-        
-        gecerli_veri['Simule_Fiyat'] = gecerli_veri[baz_col] * p_rel
-        df_analiz.loc[gecerli_veri.index, 'Aylik_Ortalama'] = gecerli_veri['Simule_Fiyat']
+        p_rel = gecerli_veri[son] / gecerli_veri[baz_col].replace(0, np.nan)
+        p_rel = p_rel.replace([np.inf, -np.inf], np.nan).fillna(1)
+        gecerli_veri['Simule_Fiyat'] = gecerli_veri[son]
 
         if w.sum() > 0: 
             enf_genel = (w * p_rel).sum() / w.sum() * 100 - 100
         
         gida_df = gecerli_veri[gecerli_veri['Kod'].astype(str).str.startswith("01")]
         if not gida_df.empty and gida_df[aktif_agirlik_col].sum() > 0:
-            gida_rel = gida_df['Simule_Fiyat'] / gida_df[baz_col]
+            gida_rel = gida_df['Simule_Fiyat'] / gida_df[baz_col].replace(0, np.nan)
+            gida_rel = gida_rel.replace([np.inf, -np.inf], np.nan).fillna(1)
             enf_gida = ((gida_df[aktif_agirlik_col] * gida_rel).sum() / gida_df[aktif_agirlik_col].sum() * 100) - 100
 
         if enf_genel > 0:
             yillik_enf = ((1 + enf_genel/100) * (1 + BEKLENEN_AYLIK_ORT/100)**11 - 1) * 100
-            yillik_enf = yillik_enf * rng.uniform(0.98, 1.02)
         else:
             yillik_enf = 0.0
 
@@ -727,7 +677,7 @@ def hesapla_metrikler(df_analiz_base, secilen_tarih, gunler, tum_gunler_sirali, 
     
     df_analiz['Fark_Yuzde'] = df_analiz['Fark'] * 100
     
-    # Günlük değişim: Son gün / Önceki gün (baz_col = önceki ayın son günü)
+    # Günlük değişim: Son gün / Bir önceki gün (ayın ilk günü için önceki ayın son günü)
     df_analiz['Gunluk_Degisim'] = (df_analiz[son] / df_analiz[baz_col].replace(0, np.nan)) - 1
     df_analiz['Gunluk_Degisim'] = df_analiz['Gunluk_Degisim'].replace([np.inf, -np.inf], np.nan).fillna(0)
     gun_farki = 0
@@ -772,7 +722,11 @@ def ui_sidebar_ve_veri_hazirlama(df_analiz_base, raw_dates, ad_col):
         st.sidebar.warning("Veri henüz oluşmadı.")
         return None
         
-    secilen_tarih = st.sidebar.selectbox("Rapor Tarihi:", options=tum_tarihler, index=0, key=f"tarih_secici_{tum_tarihler[0]}")
+    en_guncel_tarih = datetime.strptime(tum_tarihler[0], '%Y-%m-%d')
+    aktif_ay = en_guncel_tarih.strftime('%Y-%m')
+    ay_tarihleri = [d for d in tum_tarihler if d.startswith(aktif_ay)]
+
+    secilen_tarih = st.sidebar.selectbox("Rapor Tarihi:", options=ay_tarihleri, index=0, key=f"tarih_secici_{ay_tarihleri[0]}")
     
     tum_gunler_sirali = sorted([c for c in df_analiz_base.columns if re.match(r'\d{4}-\d{2}-\d{2}', str(c)) and c >= BASLANGIC_LIMITI])
     
@@ -787,9 +741,10 @@ def ui_sidebar_ve_veri_hazirlama(df_analiz_base, raw_dates, ad_col):
     col_w25, col_w26 = 'Agirlik_2025', 'Agirlik_2026'
     ZINCIR_TARIHI = datetime(2026, 2, 4)
 
-    # BAZ TARİH - Her zaman önceki ayın son günü baz alınır
-    onceki_ay = f"{dt_son.year}-{dt_son.month-1:02d}"
-    onceki_ay_gunleri = [d for d in tum_gunler_sirali if d.startswith(onceki_ay)]
+    # BAZ TARİH - Seçili ay için sabit olarak önceki ayın son verili günü
+    onceki_ay_son = dt_son.replace(day=1) - timedelta(days=1)
+    onceki_ay_prefix = onceki_ay_son.strftime('%Y-%m')
+    onceki_ay_gunleri = [d for d in tum_gunler_sirali if d.startswith(onceki_ay_prefix)]
     baz_col = max(onceki_ay_gunleri) if onceki_ay_gunleri else tum_gunler_sirali[0]
 
     # Ağırlık sütunu belirle
@@ -930,13 +885,6 @@ def sayfa_piyasa_ozeti(ctx):
        if not df_trend.empty: 
            df_trend = df_trend.sort_values('Tarih').reset_index(drop=True)
            
-           raw_son = df_trend.iloc[-1]['Deger']
-           simule_son = ctx["enf_genel"]
-           
-           fark = simule_son - raw_son
-           max_idx = max(1, len(df_trend) - 1)
-           df_trend['Deger'] = df_trend['Deger'] + fark * (df_trend.index / max_idx)
-
            son_deger = df_trend.iloc[-1]['Deger']
            y_max = max(5, df_trend['Deger'].max() + 0.5)
            y_min = min(-5, df_trend['Deger'].min() - 0.5)
@@ -965,7 +913,7 @@ def sayfa_piyasa_ozeti(ctx):
 
     st.markdown("---")
     
-    st.markdown("### 🔥 Fiyatı En Çok Değişenler (Simüle Edilmiş - Top 10)")
+    st.markdown("### 🔥 Fiyatı En Çok Değişenler (Top 10)")
     c_art, c_az = st.columns(2)
     
     artan_10, azalan_10 = sabit_kademeli_top10_hazirla(ctx)
@@ -973,14 +921,14 @@ def sayfa_piyasa_ozeti(ctx):
     with c_art:
         st.markdown("<div style='color:#ef4444; font-weight:800; font-size:16px; margin-bottom:15px; text-shadow: 0 0 10px rgba(239,68,68,0.3);'>🔺 EN ÇOK ARTAN 10 ÜRÜN</div>", unsafe_allow_html=True)
         if not artan_10.empty:
-            disp_artan = artan_10[[ctx['ad_col'], ctx['son']]].copy()
-            disp_artan['Değişim'] = artan_10['Fark'] * 100
+            disp_artan = artan_10[[ctx['ad_col'], 'Ilk_Fiyat', 'Son_Fiyat', 'Fark_Yuzde']].copy()
             st.dataframe(
                 disp_artan,
                 column_config={
                     ctx['ad_col']: "Ürün Adı",
-                    ctx['son']: st.column_config.NumberColumn("Son Fiyat", format="%.2f ₺"),
-                    "Değişim": st.column_config.NumberColumn("% Değişim", format="+%.2f %%")
+                    'Ilk_Fiyat': st.column_config.NumberColumn("İlk Fiyat", format="%.2f ₺"),
+                    'Son_Fiyat': st.column_config.NumberColumn("Son Fiyat", format="%.2f ₺"),
+                    'Fark_Yuzde': st.column_config.NumberColumn("% Değişim", format="+%.2f %%")
                 },
                 hide_index=True, use_container_width=True
             )
@@ -990,14 +938,14 @@ def sayfa_piyasa_ozeti(ctx):
     with c_az:
         st.markdown("<div style='color:#22c55e; font-weight:800; font-size:16px; margin-bottom:15px; text-shadow: 0 0 10px rgba(34,197,94,0.3);'>🔻 EN ÇOK DÜŞEN 10 ÜRÜN</div>", unsafe_allow_html=True)
         if not azalan_10.empty:
-            disp_azalan = azalan_10[[ctx['ad_col'], ctx['son']]].copy()
-            disp_azalan['Değişim'] = azalan_10['Fark'] * 100
+            disp_azalan = azalan_10[[ctx['ad_col'], 'Ilk_Fiyat', 'Son_Fiyat', 'Fark_Yuzde']].copy()
             st.dataframe(
                 disp_azalan,
                 column_config={
                     ctx['ad_col']: "Ürün Adı",
-                    ctx['son']: st.column_config.NumberColumn("Son Fiyat", format="%.2f ₺"),
-                    "Değişim": st.column_config.NumberColumn("% Değişim", format="%.2f %%")
+                    'Ilk_Fiyat': st.column_config.NumberColumn("İlk Fiyat", format="%.2f ₺"),
+                    'Son_Fiyat': st.column_config.NumberColumn("Son Fiyat", format="%.2f ₺"),
+                    'Fark_Yuzde': st.column_config.NumberColumn("% Değişim", format="%.2f %%")
                 },
                 hide_index=True, use_container_width=True
             )
@@ -1173,97 +1121,31 @@ def sayfa_trend_analizi(ctx):
 
 
 
-    def _deterministik_tohum(df_artan, df_azalan):
-        artan_imza = "|".join(df_artan[ad_col].astype(str).tolist())
-        azalan_imza = "|".join(df_azalan[ad_col].astype(str).tolist())
-        baz_metin = f"{son_col}::{ad_col}::{artan_imza}::{azalan_imza}"
-        return int.from_bytes(baz_metin.encode("utf-8"), "little") % (2**32)
-
-    def kademeli_oran_ayarla(df_subset, rng, yon="artan"):
-        if df_subset.empty:
-            return df_subset
-
-        guncel_df = df_subset.copy()
-        guncel_oran = rng.uniform(14.75, 14.95)
-        yeni_farklar = []
-
-        for _ in range(len(guncel_df)):
-            kusurat = rng.uniform(-0.15, 0.15)
-            final_oran = guncel_oran + kusurat
-
-            if yon == "artan":
-                yeni_farklar.append(final_oran / 100.0)
-            else:
-                yeni_farklar.append(-final_oran / 100.0)
-
-            guncel_oran -= rng.uniform(1.20, 1.60)
-
-        guncel_df.loc[guncel_df.index, 'Fark'] = yeni_farklar
-        guncel_df.loc[guncel_df.index, 'Fark_Yuzde'] = guncel_df['Fark'] * 100
-        return guncel_df
-
-    tohum = _deterministik_tohum(artan_10, azalan_10)
-    rng = np.random.default_rng(tohum)
-
-    artan_sabit = kademeli_oran_ayarla(artan_10, rng, "artan")
-    azalan_sabit = kademeli_oran_ayarla(azalan_10, rng, "azalan")
-    return artan_sabit, azalan_sabit
-
-
 def sabit_kademeli_top10_hazirla(ctx):
-    """Top 10 tablolarını veriye göre değişen ama aynı veri için sabit tutar."""
-    df_analiz = ctx["df_analiz"]
+    """Top 10 artan/azalan listesini gerçek veriyle hesaplar."""
+    df_analiz = ctx["df_analiz"].copy()
     son_col = ctx['son']
     ad_col = ctx['ad_col']
-    
-    # Veriyi filtrele
-    df_fark = df_analiz.dropna(subset=['Fark', son_col, ad_col]).copy()
-    artan_10 = df_fark[df_fark['Fark'] > 0].sort_values('Fark', ascending=False).head(10).copy()
-    azalan_10 = df_fark[df_fark['Fark'] < 0].sort_values('Fark', ascending=True).head(10).copy()
 
-    def _deterministik_tohum(df_artan, df_azalan):
-        # ❌ ESKİ: Sadece isimlere bakıyordu
-        # artan_imza = "|".join(df_artan[ad_col].astype(str).tolist())
-        
-        # ✅ YENİ: İsimler + Fark değerleri + son_col değerlerini hash'le
-        artan_veri = df_artan[[ad_col, 'Fark', son_col]].to_json()
-        azalan_veri = df_azalan[[ad_col, 'Fark', son_col]].to_json()
-        baz_metin = f"{son_col}::{ad_col}::{artan_veri}::{azalan_veri}"
-        
-        # MD5 ile stabil hash üret (Python'un built-in hash()'i oturumlar arası değişir)
-        return int(hashlib.md5(baz_metin.encode()).hexdigest(), 16) % (2**32)
+    ay_ilk_gunu = f"{son_col[:8]}01"
+    if ay_ilk_gunu not in df_analiz.columns:
+        return pd.DataFrame(), pd.DataFrame()
 
-    def kademeli_oran_ayarla(df_subset, rng, yon="artan"):
-        if df_subset.empty:
-            return df_subset
+    cols = [ad_col, ay_ilk_gunu, son_col]
+    df_fark = df_analiz.dropna(subset=cols).copy()
+    df_fark[ay_ilk_gunu] = pd.to_numeric(df_fark[ay_ilk_gunu], errors='coerce')
+    df_fark[son_col] = pd.to_numeric(df_fark[son_col], errors='coerce')
+    df_fark = df_fark[(df_fark[ay_ilk_gunu] > 0) & (df_fark[son_col] > 0)]
 
-        guncel_df = df_subset.copy()
-        guncel_oran = rng.uniform(14.75, 14.95)
-        yeni_farklar = []
+    df_fark['Ilk_Fiyat'] = df_fark[ay_ilk_gunu]
+    df_fark['Son_Fiyat'] = df_fark[son_col]
+    df_fark['Fark'] = (df_fark['Son_Fiyat'] / df_fark['Ilk_Fiyat']) - 1
+    df_fark['Fark_Yuzde'] = df_fark['Fark'] * 100
 
-        for _ in range(len(guncel_df)):
-            kusurat = rng.uniform(-0.15, 0.15)
-            final_oran = guncel_oran + kusurat
+    artan_10 = df_fark.sort_values('Fark', ascending=False).head(10).copy()
+    azalan_10 = df_fark.sort_values('Fark', ascending=True).head(10).copy()
 
-            if yon == "artan":
-                yeni_farklar.append(final_oran / 100.0)
-            else:
-                yeni_farklar.append(-final_oran / 100.0)
-
-            guncel_oran -= rng.uniform(1.20, 1.60)
-
-        guncel_df.loc[guncel_df.index, 'Fark'] = yeni_farklar
-        guncel_df.loc[guncel_df.index, 'Fark_Yuzde'] = guncel_df['Fark'] * 100
-        return guncel_df
-
-    # Veriye özgü deterministik tohum
-    tohum = _deterministik_tohum(artan_10, azalan_10)
-    rng = np.random.default_rng(tohum)
-
-    artan_sabit = kademeli_oran_ayarla(artan_10, rng, "artan")
-    azalan_sabit = kademeli_oran_ayarla(azalan_10, rng, "azalan")
-    
-    return artan_sabit.copy(), azalan_sabit.copy()
+    return artan_10, azalan_10
 
 # --- ANA MAIN ---
 def main():
